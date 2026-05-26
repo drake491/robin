@@ -15,6 +15,8 @@ from config import (
     OPENAI_API_KEY,
     ANTHROPIC_API_KEY,
     LLAMA_CPP_BASE_URL,
+    CUSTOM_API_BASE_URL,
+    CUSTOM_API_KEY,
 )
 
 
@@ -209,6 +211,12 @@ def fetch_ollama_models() -> List[str]:
                 available.append(name)
         return available
     except (requests.RequestException, ValueError):
+        import logging
+        if OLLAMA_BASE_URL and ("localhost" in OLLAMA_BASE_URL.lower() or "127.0.0.1" in OLLAMA_BASE_URL.lower()):
+            logging.warning(
+                "Ollama unreachable at %s. If running Robin in Docker, use "
+                "http://host.docker.internal:<port> instead of localhost.", OLLAMA_BASE_URL
+            )
         return []
 
 
@@ -230,6 +238,20 @@ def fetch_llama_cpp_models() -> List[str]:
     except (requests.RequestException, ValueError, KeyError):
         return []
 
+
+def fetch_custom_api_models() -> List[str]:
+    """Retrieve models from any OpenAI-compatible API endpoint."""
+    if not CUSTOM_API_BASE_URL:
+        return []
+    base = CUSTOM_API_BASE_URL.rstrip("/")
+    if not base.endswith("/v1"):
+        base += "/v1"
+    try:
+        resp = requests.get(f"{base}/models", timeout=3)
+        resp.raise_for_status()
+        return [m["id"] for m in resp.json().get("data", []) if "id" in m]
+    except (requests.RequestException, ValueError, KeyError):
+        return []
 
 
 def _is_set(v: Optional[str]) -> bool:
@@ -289,6 +311,8 @@ def get_model_choices() -> List[str]:
     # Dynamic local models via llama.cpp which uses OpenAI style API
     dynamic_models += fetch_llama_cpp_models()
 
+    dynamic_models += fetch_custom_api_models()
+
     normalized = {_normalize_model_name(m): m for m in gated_base_models}
     for dm in dynamic_models:
         key = _normalize_model_name(dm)
@@ -317,12 +341,32 @@ def resolve_model_config(model_choice: str):
     # llama.cpp (OpenAI-compatible)
     for llama_model in fetch_llama_cpp_models():
         if _normalize_model_name(llama_model) == model_choice_lower:
+            base = (LLAMA_CPP_BASE_URL or "").rstrip("/")
+            if not base.endswith("/v1"):
+                base += "/v1"
             return {
                 "class": ChatOpenAI,
                 "constructor_params": {
                     "model_name": llama_model,
-                    "base_url": LLAMA_CPP_BASE_URL,
+                    "base_url": base,
                     "api_key": OPENAI_API_KEY or "sk-local",
+                    "streaming": False,
+                },
+            }
+
+    # Custom OpenAI-compatible API
+    for custom_model in fetch_custom_api_models():
+        if _normalize_model_name(custom_model) == model_choice_lower:
+            base = (CUSTOM_API_BASE_URL or "").rstrip("/")
+            if not base.endswith("/v1"):
+                base += "/v1"
+            return {
+                "class": ChatOpenAI,
+                "constructor_params": {
+                    "model_name": custom_model,
+                    "base_url": base,
+                    "api_key": CUSTOM_API_KEY or "sk-custom",
+                    "streaming": False,
                 },
             }
 
@@ -334,3 +378,38 @@ def resolve_model_config(model_choice: str):
             }
 
     return None
+
+
+def get_model_display_names(model_keys: List[str]) -> dict:
+    """Return a display label dict mapping model key -> '[provider] model_key'."""
+    ollama_set = set(fetch_ollama_models())
+    llama_cpp_set = set(fetch_llama_cpp_models())
+    custom_set = set(fetch_custom_api_models())
+
+    display = {}
+    for key in model_keys:
+        cfg = _llm_config_map.get(_normalize_model_name(key))
+        if cfg:
+            cls = cfg.get("class")
+            ctor = cfg.get("constructor_params", {}) or {}
+            base_url = str(ctor.get("base_url", "")).lower()
+            if "openrouter" in base_url or "openrouter" in key.lower():
+                prefix = "openrouter"
+            elif cls is ChatAnthropic:
+                prefix = "anthropic"
+            elif cls is ChatGoogleGenerativeAI:
+                prefix = "google"
+            elif cls is ChatOpenAI:
+                prefix = "openai"
+            else:
+                prefix = "other"
+        elif key in ollama_set:
+            prefix = "ollama"
+        elif key in llama_cpp_set:
+            prefix = "llama.cpp"
+        elif key in custom_set:
+            prefix = "custom"
+        else:
+            prefix = "local"
+        display[key] = f"[{prefix}] {key}"
+    return display

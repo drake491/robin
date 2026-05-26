@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from scrape import scrape_multiple
 from search import get_search_results
-from llm_utils import BufferedStreamingHandler, get_model_choices
+from llm_utils import BufferedStreamingHandler, get_model_choices, get_model_display_names
 from llm import get_llm, refine_query, filter_results, generate_summary, PRESET_PROMPTS
 from config import (
     OPENAI_API_KEY,
@@ -134,6 +134,7 @@ def _env_is_set(value) -> bool:
     return bool(value and str(value).strip() and "your_" not in str(value))
 
 model_options = get_model_choices()
+model_display_names = get_model_display_names(model_options)
 default_model_index = (
     next(
         (idx for idx, name in enumerate(model_options) if name.lower() == "gpt4o"),
@@ -155,6 +156,7 @@ if not model_options:
 model = st.sidebar.selectbox(
     "Select LLM Model",
     model_options,
+    format_func=lambda m: model_display_names.get(m, m),
     index=default_model_index,
     key="model_select",
 )

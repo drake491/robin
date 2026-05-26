@@ -47,6 +47,7 @@ def get_llm(model_choice):
 
 def _ensure_credentials(model_choice: str, llm_class, model_params: dict) -> None:
     """Raise a clear error if the user selects a hosted model without a key."""
+    from config import CUSTOM_API_BASE_URL, CUSTOM_API_KEY
 
     def _require(key_value, env_var, provider_name):
         if key_value:
@@ -66,6 +67,10 @@ def _ensure_credentials(model_choice: str, llm_class, model_params: dict) -> Non
         base_url = (model_params or {}).get("base_url", "").lower()
         if "openrouter" in base_url:
             _require(OPENROUTER_API_KEY, "OPENROUTER_API_KEY", "OpenRouter")
+        elif base_url and ("localhost" in base_url or "127.0.0.1" in base_url):
+            pass  # local model — no API key required
+        elif CUSTOM_API_BASE_URL and base_url and CUSTOM_API_BASE_URL.lower().rstrip("/") in base_url:
+            _require(CUSTOM_API_KEY, "CUSTOM_API_KEY", "Custom API")
         else:
             _require(OPENAI_API_KEY, "OPENAI_API_KEY", "OpenAI")
 
