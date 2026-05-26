@@ -312,6 +312,12 @@ def get_model_choices() -> List[str]:
 
     dynamic_models += fetch_custom_api_models()
 
+    # Manual model from sidebar — add it if not already discovered
+    if config.CUSTOM_API_MODEL and config.CUSTOM_API_MODEL.strip():
+        manual = config.CUSTOM_API_MODEL.strip()
+        if _normalize_model_name(manual) not in {_normalize_model_name(m) for m in dynamic_models}:
+            dynamic_models.append(manual)
+
     normalized = {_normalize_model_name(m): m for m in gated_base_models}
     for dm in dynamic_models:
         key = _normalize_model_name(dm)
@@ -353,8 +359,13 @@ def resolve_model_config(model_choice: str):
                 },
             }
 
-    # Custom OpenAI-compatible API
-    for custom_model in fetch_custom_api_models():
+    # Custom OpenAI-compatible API — manual model name or auto-discovered
+    custom_candidates = list(fetch_custom_api_models())
+    if config.CUSTOM_API_MODEL and config.CUSTOM_API_MODEL.strip():
+        manual = config.CUSTOM_API_MODEL.strip()
+        if _normalize_model_name(manual) not in {_normalize_model_name(m) for m in custom_candidates}:
+            custom_candidates.append(manual)
+    for custom_model in custom_candidates:
         if _normalize_model_name(custom_model) == model_choice_lower:
             base = (config.CUSTOM_API_BASE_URL or "").rstrip("/")
             if not base.endswith("/v1"):

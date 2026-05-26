@@ -139,10 +139,13 @@ if "custom_api_url" not in st.session_state:
     st.session_state["custom_api_url"] = _robin_cfg.CUSTOM_API_BASE_URL or ""
 if "custom_api_key" not in st.session_state:
     st.session_state["custom_api_key"] = _robin_cfg.CUSTOM_API_KEY or ""
+if "custom_api_model" not in st.session_state:
+    st.session_state["custom_api_model"] = _robin_cfg.CUSTOM_API_MODEL or ""
 
 # Push current session values into config so llm_utils picks them up this rerun
 _robin_cfg.CUSTOM_API_BASE_URL = st.session_state["custom_api_url"].strip() or None
 _robin_cfg.CUSTOM_API_KEY = st.session_state["custom_api_key"].strip() or None
+_robin_cfg.CUSTOM_API_MODEL = st.session_state["custom_api_model"].strip() or None
 
 model_options = get_model_choices()
 model_display_names = get_model_display_names(model_options)
@@ -186,6 +189,12 @@ with st.sidebar.expander("🔌 Custom API Provider"):
         key="custom_api_key",
         type="password",
         help="API key for the custom provider (leave blank if not required)",
+    )
+    st.text_input(
+        "Model Name",
+        key="custom_api_model",
+        placeholder="llama-3.3-70b-versatile",
+        help="Model to use. Required if the provider doesn't expose /v1/models for auto-discovery.",
     )
 threads = st.sidebar.slider("Scraping Threads", 1, 16, 4, key="thread_slider")
 max_results = st.sidebar.slider(
