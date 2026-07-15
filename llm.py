@@ -209,14 +209,22 @@ PRESET_PROMPTS = {
     9. Be objective and analytical in your assessment.
     10. Ignore not safe for work texts from the analysis
 
-    Output Format:
-    1. Input Query: {query}
-    2. Source Links Referenced for Analysis - this heading will include all source links used for the analysis
-    3. Investigation Artifacts - this heading will include all technical artifacts identified including name, email, phone, cryptocurrency addresses, domains, darkweb markets, forum names, threat actor information, malware names, etc.
-    4. Key Insights
-    5. Next Steps - this includes next investigative steps including search queries to search more on a specific artifacts for example or any other topic.
+    Output Format — respond in Markdown. Render EVERY section below as its own `## Heading` so each is clearly separated, and use bullet points (`-`) for all lists. Do NOT use numbered lists anywhere in the response.
 
-    Format your response in a structured way with clear section headings.
+    ## Input Query
+    {query}
+
+    ## Source Links Referenced for Analysis
+    - every source link used for the analysis
+
+    ## Investigation Artifacts
+    - each technical artifact with its context (name, email, phone, cryptocurrency address, domain, darkweb market, forum name, threat actor, malware name, TTP, etc.)
+
+    ## Key Insights
+    - each insight as its own bullet — specific, actionable, and evidence-based
+
+    ## Next Steps
+    - each next investigative step or follow-up search query as its own bullet
 
     INPUT:
     """,
@@ -235,15 +243,25 @@ PRESET_PROMPTS = {
     8. Include suggested next steps for containment, detection, and further hunting.
     9. Be objective and analytical. Ignore not safe for work texts.
 
-    Output Format:
-    1. Input Query: {query}
-    2. Source Links Referenced for Analysis
-    3. Malware / Ransomware Indicators (hashes, C2s, payload names, TTPs)
-    4. Threat Actor Profile (group name, aliases, known victims, sector targeting)
-    5. Key Insights
-    6. Next Steps (hunting queries, detection rules, further investigation)
+    Output Format — respond in Markdown. Render EVERY section below as its own `## Heading` so each is clearly separated, and use bullet points (`-`) for all lists. Do NOT use numbered lists anywhere in the response.
 
-    Format your response in a structured way with clear section headings.
+    ## Input Query
+    {query}
+
+    ## Source Links Referenced for Analysis
+    - every source link used for the analysis
+
+    ## Malware / Ransomware Indicators
+    - each indicator as a bullet (hashes, C2s, payload names, TTPs)
+
+    ## Threat Actor Profile
+    - group name, aliases, known victims, sector targeting — one bullet each
+
+    ## Key Insights
+    - each insight as its own bullet — focused on threat actor behavior and malware evolution
+
+    ## Next Steps
+    - each hunting query, detection rule, or further investigation step as its own bullet
 
     INPUT:
     """,
@@ -261,16 +279,28 @@ PRESET_PROMPTS = {
     7. Include recommended protective actions and further investigation queries.
     8. Be objective. Ignore not safe for work texts. Handle all personal data with discretion.
 
-    Output Format:
-    1. Input Query: {query}
-    2. Source Links Referenced for Analysis
-    3. Exposed PII Artifacts (type, value, source context)
-    4. Breach / Marketplace Sources Identified
-    5. Exposure Risk Assessment
-    6. Key Insights
-    7. Next Steps (protective actions, further queries)
+    Output Format — respond in Markdown. Render EVERY section below as its own `## Heading` so each is clearly separated, and use bullet points (`-`) for all lists. Do NOT use numbered lists anywhere in the response.
 
-    Format your response in a structured way with clear section headings.
+    ## Input Query
+    {query}
+
+    ## Source Links Referenced for Analysis
+    - every source link used for the analysis
+
+    ## Exposed PII Artifacts
+    - each artifact as a bullet (type, value, source context)
+
+    ## Breach / Marketplace Sources Identified
+    - each breach or marketplace source as a bullet
+
+    ## Exposure Risk Assessment
+    - what data is available and how actionable it is for a threat actor
+
+    ## Key Insights
+    - each insight on the individual's exposure risk as its own bullet
+
+    ## Next Steps
+    - each protective action or further query as its own bullet
 
     INPUT:
     """,
@@ -288,16 +318,28 @@ PRESET_PROMPTS = {
     7. Include recommended incident response steps and further investigation queries.
     8. Be objective and analytical. Ignore not safe for work texts.
 
-    Output Format:
-    1. Input Query: {query}
-    2. Source Links Referenced for Analysis
-    3. Leaked Corporate Artifacts (credentials, documents, source code, databases)
-    4. Threat Actor / Broker Activity
-    5. Business Impact Assessment
-    6. Key Insights
-    7. Next Steps (IR actions, legal considerations, further queries)
+    Output Format — respond in Markdown. Render EVERY section below as its own `## Heading` so each is clearly separated, and use bullet points (`-`) for all lists. Do NOT use numbered lists anywhere in the response.
 
-    Format your response in a structured way with clear section headings.
+    ## Input Query
+    {query}
+
+    ## Source Links Referenced for Analysis
+    - every source link used for the analysis
+
+    ## Leaked Corporate Artifacts
+    - each artifact as a bullet (credentials, documents, source code, databases)
+
+    ## Threat Actor / Broker Activity
+    - each threat actor or broker activity as a bullet
+
+    ## Business Impact Assessment
+    - competitive or operational damage that could result from the exposure
+
+    ## Key Insights
+    - each insight on the corporate risk posture as its own bullet
+
+    ## Next Steps
+    - each IR action, legal consideration, or further query as its own bullet
 
     INPUT:
     """,
