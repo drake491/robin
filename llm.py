@@ -1,7 +1,9 @@
 import re
+import json
 import openai
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.messages import HumanMessage, AIMessage
 from llm_utils import _common_llm_params, resolve_model_config, get_model_choices
 from config import (
     OPENAI_API_KEY,
@@ -313,3 +315,116 @@ def generate_summary(llm, query, content, preset="threat_intel", custom_instruct
     )
     chain = prompt_template | llm | StrOutputParser()
     return chain.invoke({"query": query, "content": content})
+
+
+# --- Conversational follow-up (v2.8) ---
+
+# Persona per preset — the follow-up adopts the domain expertise of the selected
+# preset, but answers conversationally instead of re-emitting the full report.
+_FOLLOWUP_PERSONAS = {
+    "threat_intel": "a Cybercrime Threat Intelligence Expert",
+    "ransomware_malware": "a Malware and Ransomware Intelligence Expert",
+    "personal_identity": "a Personal Threat Intelligence Expert",
+    "corporate_espionage": "a Corporate Intelligence Expert",
+}
+
+_FOLLOWUP_SYSTEM = """
+You are {persona}, answering follow-up questions about a dark web OSINT investigation that has already been completed.
+
+Rules:
+1. STRICT GROUNDING: Answer ONLY from the INVESTIGATION CONTEXT below and the conversation so far. If the answer is not present in the context, say so plainly — do not infer, extrapolate, or fabricate artifacts or claims.
+2. Answer the specific question directly and conversationally. Do NOT reproduce the full structured report format; this is a chat.
+3. When you reference an artifact or claim, point to the source link or section it came from in the context.
+4. Be concise and analytical. Ignore not-safe-for-work text.
+
+INVESTIGATION CONTEXT:
+{context}
+"""
+
+
+def build_followup_context(query, refined, sources, scraped, summary, char_budget=12000):
+    """Assemble the grounding context a follow-up is answered from:
+    original + refined query, sources, the generated summary, and a
+    char-budgeted slice of the raw scraped content (may be absent for
+    investigations loaded from disk)."""
+    parts = [f"ORIGINAL QUERY: {query}", f"REFINED QUERY: {refined}"]
+    if sources:
+        src_lines = "\n".join(
+            f"- {s.get('title', 'Untitled')} ({s.get('link', '')})" for s in sources
+        )
+        parts.append("SOURCES:\n" + src_lines)
+    if summary:
+        parts.append("INVESTIGATION SUMMARY:\n" + str(summary))
+    if scraped:
+        raw = scraped if isinstance(scraped, str) else "\n\n".join(str(x) for x in scraped)
+        if len(raw) > char_budget:
+            raw = raw[:char_budget] + "\n\n[...truncated...]"
+        parts.append("RAW SCRAPED CONTENT (may be truncated):\n" + raw)
+    return "\n\n".join(parts)
+
+
+def answer_followup(llm, question, context, history=None, preset="threat_intel", custom_instructions=""):
+    """Answer a grounded follow-up question. `history` is a list of LangChain
+    HumanMessage/AIMessage (already windowed by the caller). Streams if the llm
+    has streaming callbacks attached; returns the full answer text."""
+    persona = _FOLLOWUP_PERSONAS.get(preset, _FOLLOWUP_PERSONAS["threat_intel"])
+    system_prompt = _FOLLOWUP_SYSTEM.format(persona=persona, context=context)
+    if custom_instructions and custom_instructions.strip():
+        system_prompt = system_prompt.rstrip() + f"\n\nAlso keep in mind: {custom_instructions.strip()}"
+    prompt_template = ChatPromptTemplate(
+        [
+            ("system", system_prompt),
+            MessagesPlaceholder("history"),
+            ("user", "{question}"),
+        ]
+    )
+    chain = prompt_template | llm | StrOutputParser()
+    return chain.invoke({"history": history or [], "question": question})
+
+
+def suggest_pivots(llm, query, content, preset="threat_intel", max_pivots=5):
+    """Structured call: propose up to `max_pivots` short pivot search queries
+    that would extend the investigation. Returns a list of strings (empty on
+    any failure — pivots are a convenience, never block the pipeline)."""
+    system_prompt = """
+    You are a dark web OSINT investigator. Based on the completed investigation data below, propose concise follow-up SEARCH QUERIES that would pivot the investigation toward related leads — new artifacts, threat actor handles, marketplaces, forums, breach names, etc. that actually appear in or are strongly implied by the data.
+
+    Rules:
+    1. Each query must be 5 words or fewer, with no logical operators (AND, OR, etc.).
+    2. Propose between 1 and {max_pivots} queries — only ones grounded in the data.
+    3. Output ONLY a JSON array of strings, nothing else. Example: ["query one", "query two"]
+
+    INVESTIGATION QUERY: {query}
+    INVESTIGATION DATA:
+    """.replace("{max_pivots}", str(max_pivots))
+
+    raw_content = content if isinstance(content, str) else "\n\n".join(str(x) for x in (content or []))
+    prompt_template = ChatPromptTemplate(
+        [("system", system_prompt), ("user", "{content}")]
+    )
+    # Use a fresh chain without streaming callbacks so the JSON isn't emitted to the UI.
+    chain = prompt_template | llm | StrOutputParser()
+    try:
+        raw = chain.invoke({"query": query, "content": raw_content[:8000]})
+    except Exception as e:
+        logging.warning("Pivot suggestion call failed: %s", e)
+        return []
+
+    # Defensive parse: strip code fences, extract the first JSON array.
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text).rstrip("`").strip()
+    match = re.search(r"\[.*\]", text, re.DOTALL)
+    if match:
+        text = match.group(0)
+    try:
+        pivots = json.loads(text)
+    except Exception:
+        return []
+    if not isinstance(pivots, list):
+        return []
+    cleaned = []
+    for p in pivots:
+        if isinstance(p, str) and p.strip():
+            cleaned.append(p.strip())
+    return cleaned[:max_pivots]

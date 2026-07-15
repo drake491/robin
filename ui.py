@@ -8,7 +8,11 @@ from scrape import scrape_multiple
 from search import get_search_results
 import config as _robin_cfg
 from llm_utils import BufferedStreamingHandler, get_model_choices, get_model_display_names
-from llm import get_llm, refine_query, filter_results, generate_summary, PRESET_PROMPTS
+from llm import (
+    get_llm, refine_query, filter_results, generate_summary, PRESET_PROMPTS,
+    answer_followup, suggest_pivots, build_followup_context,
+)
+from langchain_core.messages import HumanMessage, AIMessage
 from config import (
     OPENAI_API_KEY,
     ANTHROPIC_API_KEY,
@@ -327,7 +331,29 @@ if saved_investigations:
     if selected_inv_label != "(none)":
         selected_inv_idx = inv_labels.index(selected_inv_label)
         if st.sidebar.button("📂 Load", use_container_width=True, key="load_inv_btn"):
-            st.session_state["loaded_investigation"] = saved_investigations[selected_inv_idx]
+            _saved = saved_investigations[selected_inv_idx]
+            # Saved "preset" is the display label; map back to the preset key for follow-ups.
+            _saved_preset = _saved.get("preset", "threat_intel")
+            if _saved_preset in preset_options:
+                _preset_key = preset_options[_saved_preset]
+            elif _saved_preset in preset_options.values():
+                _preset_key = _saved_preset
+            else:
+                _preset_key = "threat_intel"
+            st.session_state["active_investigation"] = {
+                "query": _saved.get("query", ""),
+                "refined": _saved.get("refined_query", ""),
+                "model": _saved.get("model", ""),
+                "preset": _preset_key,
+                "preset_label": _saved.get("preset", ""),
+                "sources": _saved.get("sources", []),
+                "scraped": None,  # raw scrape isn't persisted to disk
+                "summary": _saved.get("summary", ""),
+                "results_count": len(_saved.get("sources", [])),
+                "timestamp": _saved.get("timestamp", ""),
+            }
+            st.session_state["chat_history"] = []
+            st.session_state["pivot_suggestions"] = []
             st.rerun()
 else:
     st.sidebar.caption("No saved investigations yet.")
@@ -349,24 +375,8 @@ with st.form("search_form", clear_on_submit=True):
     )
     run_button = col_button.form_submit_button("Run")
 
-# Display loaded investigation (if any)
-if "loaded_investigation" in st.session_state and not run_button:
-    inv = st.session_state["loaded_investigation"]
-    st.info(f"📂 **{inv['query']}** — {inv['timestamp'][:16]}")
-    with st.expander("📋 Notes", expanded=False):
-        st.markdown(f"**Refined Query:** `{inv['refined_query']}`")
-        st.markdown(f"**Model:** `{inv['model']}` &nbsp;&nbsp; **Domain:** {inv['preset']}")
-        st.markdown(f"**Sources:** {len(inv['sources'])}")
-    with st.expander(f"🔗 Sources ({len(inv['sources'])} results)", expanded=False):
-        for i, item in enumerate(inv["sources"], 1):
-            title = item.get("title", "Untitled")
-            link = item.get("link", "")
-            st.markdown(f"{i}. [{title}]({link})")
-    st.subheader(":red[🔎 Findings]", anchor=None, divider="gray")
-    st.markdown(inv["summary"])
-    if st.button("✖ Clear"):
-        del st.session_state["loaded_investigation"]
-        st.rerun()
+# (Completed and loaded investigations are rendered by the unified active-investigation
+#  block below, so they survive chat reruns.)
 
 # Status + result section placeholders
 status_slot = st.empty()
@@ -377,11 +387,124 @@ sources_placeholder = st.empty()
 findings_placeholder = st.empty()
 
 
+# --- Active investigation + follow-up chat helpers (v2.8) ---
+
+def _render_investigation_body(inv):
+    """Render Notes / Sources / Findings / Download for a stored investigation."""
+    with st.expander("📋 Notes", expanded=False):
+        st.markdown(f"**Refined Query:** `{inv.get('refined', '')}`")
+        st.markdown(
+            f"**Model:** `{inv.get('model', '')}` &nbsp;&nbsp; "
+            f"**Domain:** {inv.get('preset_label') or inv.get('preset', '')}"
+        )
+        _counts = f"**Sources:** {len(inv.get('sources', []))}"
+        if inv.get("scraped"):
+            _counts += f" &nbsp;&nbsp; **Scraped:** {len(inv['scraped'])}"
+        st.markdown(_counts)
+    sources = inv.get("sources", [])
+    with st.expander(f"🔗 Sources ({len(sources)} results)", expanded=False):
+        for i, item in enumerate(sources, 1):
+            st.markdown(f"{i}. [{item.get('title', 'Untitled')}]({item.get('link', '')})")
+    st.subheader(":red[🔎 Findings]", anchor=None, divider="gray")
+    summary = inv.get("summary", "") or ""
+    st.markdown(summary)
+    if summary:
+        now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        b64 = base64.b64encode(summary.encode()).decode()
+        href = (
+            f'<div class="aStyle">📥 <a href="data:file/markdown;base64,{b64}" '
+            f'download="summary_{now}.md">Download</a></div>'
+        )
+        st.markdown(href, unsafe_allow_html=True)
+
+
+def _followup_history_messages(chat_history, max_turns=5):
+    """Convert the last `max_turns` Q&A turns into LangChain messages for the model."""
+    recent = chat_history[-(max_turns * 2):] if chat_history else []
+    msgs = []
+    for turn in recent:
+        if turn.get("role") == "user":
+            msgs.append(HumanMessage(content=turn.get("content", "")))
+        else:
+            msgs.append(AIMessage(content=turn.get("content", "")))
+    return msgs
+
+
+def _render_chat_panel(inv):
+    """Suggested pivots, chat history, clear control, and the follow-up input."""
+    st.divider()
+    st.subheader(":red[💬 Follow-up Chat]", anchor=None, divider="gray")
+
+    # Suggested pivots — one click launches a new foreground investigation.
+    pivots = st.session_state.get("pivot_suggestions", [])
+    if pivots:
+        st.caption("Suggested pivots — click to run as a new investigation:")
+        pivot_cols = st.columns(len(pivots))
+        for i, (col, pq) in enumerate(zip(pivot_cols, pivots)):
+            if col.button(f"🔎 {pq}", key=f"pivot_{i}", use_container_width=True):
+                st.session_state["pivot_query"] = pq
+                st.rerun()
+
+    # Existing conversation.
+    for turn in st.session_state.get("chat_history", []):
+        with st.chat_message(turn.get("role", "assistant")):
+            st.markdown(turn.get("content", ""))
+
+    if st.session_state.get("chat_history"):
+        if st.button("🧹 Clear chat", key="clear_chat"):
+            st.session_state["chat_history"] = []
+            st.rerun()
+
+    # New follow-up — grounded in this investigation's context.
+    followup = st.chat_input("Ask a follow-up about this investigation")
+    if followup:
+        with st.chat_message("user"):
+            st.markdown(followup)
+        context = build_followup_context(
+            inv.get("query", ""), inv.get("refined", ""),
+            inv.get("sources", []), inv.get("scraped"), inv.get("summary", ""),
+        )
+        history = _followup_history_messages(st.session_state.get("chat_history", []))
+        with st.chat_message("assistant"):
+            answer_slot = st.empty()
+            acc = {"text": ""}
+
+            def _emit(chunk: str):
+                acc["text"] += chunk
+                answer_slot.markdown(acc["text"])
+
+            try:
+                f_llm = get_llm(inv.get("model"))
+                f_llm.callbacks = [BufferedStreamingHandler(ui_callback=_emit)]
+                answer = answer_followup(
+                    f_llm, followup, context, history=history,
+                    preset=inv.get("preset", "threat_intel"),
+                )
+                # #137 pattern: reasoning models stream nothing — fall back to the return value.
+                if not acc["text"].strip() and answer:
+                    acc["text"] = answer
+                    answer_slot.markdown(answer)
+            except Exception as e:
+                acc["text"] = f"⚠️ Failed to answer follow-up: {e}"
+                answer_slot.markdown(acc["text"])
+
+        st.session_state.setdefault("chat_history", [])
+        st.session_state["chat_history"].append({"role": "user", "content": followup})
+        st.session_state["chat_history"].append({"role": "assistant", "content": acc["text"]})
+
+
+# A run is triggered by a submitted query OR a one-click pivot from the chat panel.
+_pivot_query = st.session_state.pop("pivot_query", None)
+_active_query = _pivot_query or query
+_do_run = bool(_active_query) and (run_button or _pivot_query is not None)
+
 # Process the query
-if run_button and query:
-    # Clear any loaded investigation and old pipeline state
-    st.session_state.pop("loaded_investigation", None)
-    for k in ["refined", "results", "filtered", "scraped", "streamed_summary"]:
+if _do_run:
+    query = _active_query
+    # Clear any prior investigation, chat, and pipeline state
+    st.session_state.pop("active_investigation", None)
+    for k in ["refined", "results", "filtered", "scraped", "streamed_summary",
+              "chat_history", "pivot_suggestions"]:
         st.session_state.pop(k, None)
 
     # Stage 1 - Load LLM
@@ -506,3 +629,38 @@ if run_button and query:
         st.markdown(href, unsafe_allow_html=True)
 
     status_slot.success(f"✔️ Pipeline completed successfully! Investigation saved as `{_fname}`")
+
+    # Persist as the active investigation so it survives chat reruns.
+    st.session_state["active_investigation"] = {
+        "query": query,
+        "refined": st.session_state.refined,
+        "model": model,
+        "preset": selected_preset,
+        "preset_label": selected_preset_label,
+        "sources": st.session_state.filtered,
+        "scraped": st.session_state.scraped,
+        "summary": st.session_state.streamed_summary,
+        "results_count": len(st.session_state.results),
+    }
+    st.session_state["chat_history"] = []
+
+    # Suggested pivots — structured call on a fresh (non-streaming) LLM so the
+    # JSON isn't emitted to the UI. Never blocks the pipeline.
+    with st.spinner("💡 Suggesting pivots..."):
+        try:
+            st.session_state["pivot_suggestions"] = suggest_pivots(
+                get_llm(model), query, st.session_state.scraped, preset=selected_preset,
+            )
+        except Exception:
+            st.session_state["pivot_suggestions"] = []
+
+    _render_chat_panel(st.session_state["active_investigation"])
+
+# Returning visit (no run this pass, e.g. after a chat submit or a loaded
+# investigation): render the active investigation and its chat panel.
+elif st.session_state.get("active_investigation"):
+    _inv = st.session_state["active_investigation"]
+    _ts = _inv.get("timestamp")
+    st.info(f"📂 **{_inv.get('query', '')}**" + (f" — {_ts[:16]}" if _ts else ""))
+    _render_investigation_body(_inv)
+    _render_chat_panel(_inv)
