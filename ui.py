@@ -644,8 +644,9 @@ if _do_run:
     }
     st.session_state["chat_history"] = []
 
-    # Suggested pivots — structured call on a fresh (non-streaming) LLM so the
-    # JSON isn't emitted to the UI. Never blocks the pipeline.
+    # Suggested pivots — structured call on a fresh LLM with no UI callback
+    # attached, so the JSON is never emitted to the Streamlit view. Never blocks
+    # the pipeline.
     with st.spinner("💡 Suggesting pivots..."):
         try:
             st.session_state["pivot_suggestions"] = suggest_pivots(

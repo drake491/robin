@@ -3,7 +3,6 @@ import json
 import openai
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.messages import HumanMessage, AIMessage
 from llm_utils import _common_llm_params, resolve_model_config, get_model_choices
 from config import (
     OPENAI_API_KEY,
@@ -12,7 +11,6 @@ from config import (
     OPENROUTER_API_KEY,
 )
 import logging
-import re
 
 import warnings
 
@@ -308,13 +306,18 @@ PRESET_PROMPTS = {
 
 def generate_summary(llm, query, content, preset="threat_intel", custom_instructions=""):
     system_prompt = PRESET_PROMPTS.get(preset, PRESET_PROMPTS["threat_intel"])
+    invoke_vars = {"query": query, "content": content}
     if custom_instructions and custom_instructions.strip():
-        system_prompt = system_prompt.rstrip() + f"\n\nAdditionally focus on: {custom_instructions.strip()}"
+        # Append as a template placeholder filled by an invoke value, so literal
+        # braces the user typed in Custom Instructions aren't misread as
+        # prompt-template variables (same safe pattern as answer_followup).
+        system_prompt = system_prompt.rstrip() + "\n\nAdditionally focus on: {custom_focus}"
+        invoke_vars["custom_focus"] = custom_instructions.strip()
     prompt_template = ChatPromptTemplate(
         [("system", system_prompt), ("user", "{content}")]
     )
     chain = prompt_template | llm | StrOutputParser()
-    return chain.invoke({"query": query, "content": content})
+    return chain.invoke(invoke_vars)
 
 
 # --- Conversational follow-up (v2.8) ---
@@ -336,7 +339,7 @@ Rules:
 2. Answer the specific question directly and conversationally. Do NOT reproduce the full structured report format; this is a chat.
 3. When you reference an artifact or claim, point to the source link or section it came from in the context.
 4. Be concise and analytical. Ignore not-safe-for-work text.
-
+{extra_instructions}
 INVESTIGATION CONTEXT:
 {context}
 """
@@ -368,18 +371,28 @@ def answer_followup(llm, question, context, history=None, preset="threat_intel",
     HumanMessage/AIMessage (already windowed by the caller). Streams if the llm
     has streaming callbacks attached; returns the full answer text."""
     persona = _FOLLOWUP_PERSONAS.get(preset, _FOLLOWUP_PERSONAS["threat_intel"])
-    system_prompt = _FOLLOWUP_SYSTEM.format(persona=persona, context=context)
+    extra_instructions = ""
     if custom_instructions and custom_instructions.strip():
-        system_prompt = system_prompt.rstrip() + f"\n\nAlso keep in mind: {custom_instructions.strip()}"
+        extra_instructions = f"\nAlso keep in mind: {custom_instructions.strip()}\n"
+    # Pass persona/context/extra as invoke VALUES (not baked into the template
+    # string) so literal braces in scraped content or the summary are not
+    # misread as prompt-template variables — the same safe pattern used by
+    # generate_summary and suggest_pivots.
     prompt_template = ChatPromptTemplate(
         [
-            ("system", system_prompt),
+            ("system", _FOLLOWUP_SYSTEM),
             MessagesPlaceholder("history"),
             ("user", "{question}"),
         ]
     )
     chain = prompt_template | llm | StrOutputParser()
-    return chain.invoke({"history": history or [], "question": question})
+    return chain.invoke({
+        "persona": persona,
+        "context": context,
+        "extra_instructions": extra_instructions,
+        "history": history or [],
+        "question": question,
+    })
 
 
 def suggest_pivots(llm, query, content, preset="threat_intel", max_pivots=5):
