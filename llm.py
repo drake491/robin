@@ -1,6 +1,7 @@
 import re
+import json
 import openai
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from llm_utils import _common_llm_params, resolve_model_config, get_model_choices
 from config import (
@@ -10,7 +11,6 @@ from config import (
     OPENROUTER_API_KEY,
 )
 import logging
-import re
 
 import warnings
 
@@ -197,6 +197,7 @@ PRESET_PROMPTS = {
     You are an Cybercrime Threat Intelligence Expert tasked with generating context-based technical investigative insights from dark web osint search engine results.
 
     Rules:
+    0. STRICT GROUNDING: Only report artifacts, IOCs, and claims explicitly present in the provided INPUT data. Do not infer, extrapolate, or fabricate anything absent from the input — if evidence isn't there, omit it rather than speculate.
     1. Analyze the Darkweb OSINT data provided using links and their raw text.
     2. Output the Source Links referenced for the analysis.
     3. Provide a detailed, contextual, evidence-based technical analysis of the data.
@@ -208,14 +209,22 @@ PRESET_PROMPTS = {
     9. Be objective and analytical in your assessment.
     10. Ignore not safe for work texts from the analysis
 
-    Output Format:
-    1. Input Query: {query}
-    2. Source Links Referenced for Analysis - this heading will include all source links used for the analysis
-    3. Investigation Artifacts - this heading will include all technical artifacts identified including name, email, phone, cryptocurrency addresses, domains, darkweb markets, forum names, threat actor information, malware names, etc.
-    4. Key Insights
-    5. Next Steps - this includes next investigative steps including search queries to search more on a specific artifacts for example or any other topic.
+    Output Format — respond in Markdown. Render EVERY section below as its own `## Heading` so each is clearly separated, and use bullet points (`-`) for all lists. Do NOT use numbered lists anywhere in the response.
 
-    Format your response in a structured way with clear section headings.
+    ## Input Query
+    {query}
+
+    ## Source Links Referenced for Analysis
+    - every source link used for the analysis
+
+    ## Investigation Artifacts
+    - each technical artifact with its context (name, email, phone, cryptocurrency address, domain, darkweb market, forum name, threat actor, malware name, TTP, etc.)
+
+    ## Key Insights
+    - each insight as its own bullet — specific, actionable, and evidence-based
+
+    ## Next Steps
+    - each next investigative step or follow-up search query as its own bullet
 
     INPUT:
     """,
@@ -223,6 +232,7 @@ PRESET_PROMPTS = {
     You are a Malware and Ransomware Intelligence Expert tasked with analyzing dark web data for malware-related threats.
 
     Rules:
+    0. STRICT GROUNDING: Only report artifacts, IOCs, and claims explicitly present in the provided INPUT data. Do not infer, extrapolate, or fabricate anything absent from the input — if evidence isn't there, omit it rather than speculate.
     1. Analyze the Darkweb OSINT data provided using links and their raw text.
     2. Output the Source Links referenced for the analysis.
     3. Focus specifically on ransomware groups, malware families, exploit kits, and attack infrastructure.
@@ -233,15 +243,25 @@ PRESET_PROMPTS = {
     8. Include suggested next steps for containment, detection, and further hunting.
     9. Be objective and analytical. Ignore not safe for work texts.
 
-    Output Format:
-    1. Input Query: {query}
-    2. Source Links Referenced for Analysis
-    3. Malware / Ransomware Indicators (hashes, C2s, payload names, TTPs)
-    4. Threat Actor Profile (group name, aliases, known victims, sector targeting)
-    5. Key Insights
-    6. Next Steps (hunting queries, detection rules, further investigation)
+    Output Format — respond in Markdown. Render EVERY section below as its own `## Heading` so each is clearly separated, and use bullet points (`-`) for all lists. Do NOT use numbered lists anywhere in the response.
 
-    Format your response in a structured way with clear section headings.
+    ## Input Query
+    {query}
+
+    ## Source Links Referenced for Analysis
+    - every source link used for the analysis
+
+    ## Malware / Ransomware Indicators
+    - each indicator as a bullet (hashes, C2s, payload names, TTPs)
+
+    ## Threat Actor Profile
+    - group name, aliases, known victims, sector targeting — one bullet each
+
+    ## Key Insights
+    - each insight as its own bullet — focused on threat actor behavior and malware evolution
+
+    ## Next Steps
+    - each hunting query, detection rule, or further investigation step as its own bullet
 
     INPUT:
     """,
@@ -249,6 +269,7 @@ PRESET_PROMPTS = {
     You are a Personal Threat Intelligence Expert tasked with analyzing dark web data for identity and personal information exposure.
 
     Rules:
+    0. STRICT GROUNDING: Only report artifacts, IOCs, and claims explicitly present in the provided INPUT data. Do not infer, extrapolate, or fabricate anything absent from the input — if evidence isn't there, omit it rather than speculate.
     1. Analyze the Darkweb OSINT data provided using links and their raw text.
     2. Output the Source Links referenced for the analysis.
     3. Focus on personally identifiable information (PII): names, emails, phone numbers, addresses, SSNs, passport data, financial account details.
@@ -258,16 +279,28 @@ PRESET_PROMPTS = {
     7. Include recommended protective actions and further investigation queries.
     8. Be objective. Ignore not safe for work texts. Handle all personal data with discretion.
 
-    Output Format:
-    1. Input Query: {query}
-    2. Source Links Referenced for Analysis
-    3. Exposed PII Artifacts (type, value, source context)
-    4. Breach / Marketplace Sources Identified
-    5. Exposure Risk Assessment
-    6. Key Insights
-    7. Next Steps (protective actions, further queries)
+    Output Format — respond in Markdown. Render EVERY section below as its own `## Heading` so each is clearly separated, and use bullet points (`-`) for all lists. Do NOT use numbered lists anywhere in the response.
 
-    Format your response in a structured way with clear section headings.
+    ## Input Query
+    {query}
+
+    ## Source Links Referenced for Analysis
+    - every source link used for the analysis
+
+    ## Exposed PII Artifacts
+    - each artifact as a bullet (type, value, source context)
+
+    ## Breach / Marketplace Sources Identified
+    - each breach or marketplace source as a bullet
+
+    ## Exposure Risk Assessment
+    - what data is available and how actionable it is for a threat actor
+
+    ## Key Insights
+    - each insight on the individual's exposure risk as its own bullet
+
+    ## Next Steps
+    - each protective action or further query as its own bullet
 
     INPUT:
     """,
@@ -275,6 +308,7 @@ PRESET_PROMPTS = {
     You are a Corporate Intelligence Expert tasked with analyzing dark web data for corporate data leaks and espionage activity.
 
     Rules:
+    0. STRICT GROUNDING: Only report artifacts, IOCs, and claims explicitly present in the provided INPUT data. Do not infer, extrapolate, or fabricate anything absent from the input — if evidence isn't there, omit it rather than speculate.
     1. Analyze the Darkweb OSINT data provided using links and their raw text.
     2. Output the Source Links referenced for the analysis.
     3. Focus on leaked corporate data: credentials, source code, internal documents, financial records, employee data, customer databases.
@@ -284,16 +318,28 @@ PRESET_PROMPTS = {
     7. Include recommended incident response steps and further investigation queries.
     8. Be objective and analytical. Ignore not safe for work texts.
 
-    Output Format:
-    1. Input Query: {query}
-    2. Source Links Referenced for Analysis
-    3. Leaked Corporate Artifacts (credentials, documents, source code, databases)
-    4. Threat Actor / Broker Activity
-    5. Business Impact Assessment
-    6. Key Insights
-    7. Next Steps (IR actions, legal considerations, further queries)
+    Output Format — respond in Markdown. Render EVERY section below as its own `## Heading` so each is clearly separated, and use bullet points (`-`) for all lists. Do NOT use numbered lists anywhere in the response.
 
-    Format your response in a structured way with clear section headings.
+    ## Input Query
+    {query}
+
+    ## Source Links Referenced for Analysis
+    - every source link used for the analysis
+
+    ## Leaked Corporate Artifacts
+    - each artifact as a bullet (credentials, documents, source code, databases)
+
+    ## Threat Actor / Broker Activity
+    - each threat actor or broker activity as a bullet
+
+    ## Business Impact Assessment
+    - competitive or operational damage that could result from the exposure
+
+    ## Key Insights
+    - each insight on the corporate risk posture as its own bullet
+
+    ## Next Steps
+    - each IR action, legal consideration, or further query as its own bullet
 
     INPUT:
     """,
@@ -302,10 +348,138 @@ PRESET_PROMPTS = {
 
 def generate_summary(llm, query, content, preset="threat_intel", custom_instructions=""):
     system_prompt = PRESET_PROMPTS.get(preset, PRESET_PROMPTS["threat_intel"])
+    invoke_vars = {"query": query, "content": content}
     if custom_instructions and custom_instructions.strip():
-        system_prompt = system_prompt.rstrip() + f"\n\nAdditionally focus on: {custom_instructions.strip()}"
+        # Append as a template placeholder filled by an invoke value, so literal
+        # braces the user typed in Custom Instructions aren't misread as
+        # prompt-template variables (same safe pattern as answer_followup).
+        system_prompt = system_prompt.rstrip() + "\n\nAdditionally focus on: {custom_focus}"
+        invoke_vars["custom_focus"] = custom_instructions.strip()
     prompt_template = ChatPromptTemplate(
         [("system", system_prompt), ("user", "{content}")]
     )
     chain = prompt_template | llm | StrOutputParser()
-    return chain.invoke({"query": query, "content": content})
+    return chain.invoke(invoke_vars)
+
+
+# --- Conversational follow-up (v2.8) ---
+
+# Persona per preset — the follow-up adopts the domain expertise of the selected
+# preset, but answers conversationally instead of re-emitting the full report.
+_FOLLOWUP_PERSONAS = {
+    "threat_intel": "a Cybercrime Threat Intelligence Expert",
+    "ransomware_malware": "a Malware and Ransomware Intelligence Expert",
+    "personal_identity": "a Personal Threat Intelligence Expert",
+    "corporate_espionage": "a Corporate Intelligence Expert",
+}
+
+_FOLLOWUP_SYSTEM = """
+You are {persona}, answering follow-up questions about a dark web OSINT investigation that has already been completed.
+
+Rules:
+1. STRICT GROUNDING: Answer ONLY from the INVESTIGATION CONTEXT below and the conversation so far. If the answer is not present in the context, say so plainly — do not infer, extrapolate, or fabricate artifacts or claims.
+2. Answer the specific question directly and conversationally. Do NOT reproduce the full structured report format; this is a chat.
+3. When you reference an artifact or claim, point to the source link or section it came from in the context.
+4. Be concise and analytical. Ignore not-safe-for-work text.
+{extra_instructions}
+INVESTIGATION CONTEXT:
+{context}
+"""
+
+
+def build_followup_context(query, refined, sources, scraped, summary, char_budget=12000):
+    """Assemble the grounding context a follow-up is answered from:
+    original + refined query, sources, the generated summary, and a
+    char-budgeted slice of the raw scraped content (may be absent for
+    investigations loaded from disk)."""
+    parts = [f"ORIGINAL QUERY: {query}", f"REFINED QUERY: {refined}"]
+    if sources:
+        src_lines = "\n".join(
+            f"- {s.get('title', 'Untitled')} ({s.get('link', '')})" for s in sources
+        )
+        parts.append("SOURCES:\n" + src_lines)
+    if summary:
+        parts.append("INVESTIGATION SUMMARY:\n" + str(summary))
+    if scraped:
+        raw = scraped if isinstance(scraped, str) else "\n\n".join(str(x) for x in scraped)
+        if len(raw) > char_budget:
+            raw = raw[:char_budget] + "\n\n[...truncated...]"
+        parts.append("RAW SCRAPED CONTENT (may be truncated):\n" + raw)
+    return "\n\n".join(parts)
+
+
+def answer_followup(llm, question, context, history=None, preset="threat_intel", custom_instructions=""):
+    """Answer a grounded follow-up question. `history` is a list of LangChain
+    HumanMessage/AIMessage (already windowed by the caller). Streams if the llm
+    has streaming callbacks attached; returns the full answer text."""
+    persona = _FOLLOWUP_PERSONAS.get(preset, _FOLLOWUP_PERSONAS["threat_intel"])
+    extra_instructions = ""
+    if custom_instructions and custom_instructions.strip():
+        extra_instructions = f"\nAlso keep in mind: {custom_instructions.strip()}\n"
+    # Pass persona/context/extra as invoke VALUES (not baked into the template
+    # string) so literal braces in scraped content or the summary are not
+    # misread as prompt-template variables — the same safe pattern used by
+    # generate_summary and suggest_pivots.
+    prompt_template = ChatPromptTemplate(
+        [
+            ("system", _FOLLOWUP_SYSTEM),
+            MessagesPlaceholder("history"),
+            ("user", "{question}"),
+        ]
+    )
+    chain = prompt_template | llm | StrOutputParser()
+    return chain.invoke({
+        "persona": persona,
+        "context": context,
+        "extra_instructions": extra_instructions,
+        "history": history or [],
+        "question": question,
+    })
+
+
+def suggest_pivots(llm, query, content, preset="threat_intel", max_pivots=5):
+    """Structured call: propose up to `max_pivots` short pivot search queries
+    that would extend the investigation. Returns a list of strings (empty on
+    any failure — pivots are a convenience, never block the pipeline)."""
+    system_prompt = """
+    You are a dark web OSINT investigator. Based on the completed investigation data below, propose concise follow-up SEARCH QUERIES that would pivot the investigation toward related leads — new artifacts, threat actor handles, marketplaces, forums, breach names, etc. that actually appear in or are strongly implied by the data.
+
+    Rules:
+    1. Each query must be 5 words or fewer, with no logical operators (AND, OR, etc.).
+    2. Propose between 1 and {max_pivots} queries — only ones grounded in the data.
+    3. Output ONLY a JSON array of strings, nothing else. Example: ["query one", "query two"]
+
+    INVESTIGATION QUERY: {query}
+    INVESTIGATION DATA:
+    """.replace("{max_pivots}", str(max_pivots))
+
+    raw_content = content if isinstance(content, str) else "\n\n".join(str(x) for x in (content or []))
+    prompt_template = ChatPromptTemplate(
+        [("system", system_prompt), ("user", "{content}")]
+    )
+    # Use a fresh chain without streaming callbacks so the JSON isn't emitted to the UI.
+    chain = prompt_template | llm | StrOutputParser()
+    try:
+        raw = chain.invoke({"query": query, "content": raw_content[:8000]})
+    except Exception as e:
+        logging.warning("Pivot suggestion call failed: %s", e)
+        return []
+
+    # Defensive parse: strip code fences, extract the first JSON array.
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text).rstrip("`").strip()
+    match = re.search(r"\[.*\]", text, re.DOTALL)
+    if match:
+        text = match.group(0)
+    try:
+        pivots = json.loads(text)
+    except Exception:
+        return []
+    if not isinstance(pivots, list):
+        return []
+    cleaned = []
+    for p in pivots:
+        if isinstance(p, str) and p.strip():
+            cleaned.append(p.strip())
+    return cleaned[:max_pivots]

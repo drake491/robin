@@ -4,7 +4,7 @@
    <h1>Robin: AI-Powered Dark Web OSINT Tool</h1>
 
    <p>Robin is an AI-powered tool for conducting dark web OSINT investigations. It leverages LLMs to refine queries, filter search results from dark web search engines, and provide an investigation summary.</p>
-   <a href="#installation">Installation</a> &bull; <a href="#usage">Usage</a> &bull; <a href="#contributing">Contributing</a> &bull; <a href="#acknowledgements">Acknowledgements</a><br><br>
+   <a href="#installation">Installation</a> &bull; <a href="#contributing">Contributing</a> &bull; <a href="#acknowledgements">Acknowledgements</a><br><br>
 </div>
 
 ![Demo](.github/assets/screen-ui.png)
@@ -20,6 +20,8 @@
 - ⚙️ **Modular Architecture** – Clean separation between search, scrape, and LLM workflows.
 - 🤖 **Multi-Model Support** – Easily switch between OpenAI, Claude, Gemini, Ollama, or any OpenAI-compatible API (LM Studio, llama.cpp, Groq, etc.).
 - 🌐 **Web UI** – Streamlit-based interface for interactive investigations.
+- 💬 **Conversational Follow-ups** – Ask grounded follow-up questions about an investigation without re-running the search — answered from that investigation's own data.
+- 🔀 **One-Click Pivots** – Suggested follow-up queries surfaced from the findings; click one to launch a fresh investigation.
 - 🐳 **Docker-Ready** – Recommended Docker deployment for clean, isolated usage.
 - 📝 **Custom Reporting** – Save investigation output to file for reporting or further analysis.
 - 🧩 **Extensible** – Easy to plug in new search engines, models, or output formats.
